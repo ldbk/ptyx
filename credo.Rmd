@@ -1,0 +1,1940 @@
+---
+title: "Data compilation `r substr(getwd(),1+max(gregexpr('/',getwd())[[1]]),nchar(getwd()))`"
+author: "ptyx 0.95"
+date: "`r date()`"
+output: 
+  pdf_document:
+    includes:
+      in_header: credo.sty
+
+bibliography: '/home/moi/datahome/work/biblio/enfin/biblioloran.bib'
+---
+
+```{r global_options, include=T,cache=F,echo=F,warning=F,message=F,progress=F,verbose=F,results="hide"}
+#knitr option
+operationnel<-TRUE
+knitr::opts_chunk$set(echo=FALSE, 
+		      warning=!operationnel, 
+		      message=!operationnel,
+		      fig.height=8,
+		      progress=!operationnel,
+		      verbose=!operationnel,
+		      include=TRUE,dev='png',autodep=FALSE)
+#package
+library(COSTcore);library(COSTdbe);library(COSTeda)
+library(dplyr);library(tidyr);library(stringr)
+library(ggplot2);library(gridExtra)
+library(sf)
+##library(openxlsx);library(mailR)
+library(pander);library(captioner)
+library(mapdata)
+library(DATRAS)
+#library(sparkTable)
+options(kableExtra.latex.load_packages = FALSE)
+library(kableExtra)
+require(openxlsx)
+#local fct
+source("credo_fct.R")
+#initialise les fonctions pour légender tables et figures
+tabcap <- captioner(prefix = "Table")
+figcap <- captioner(prefix = "Figure")
+#load stock reference base
+load("../../../analyses/wgparam2017.rdata")
+load("../../../analyses/areaciem2017.rdata")
+
+```
+
+```{r data_and_param, include=T,cache=T,echo=F}
+#paramètres data compilation
+seuilfish<-30  # nombre de poissons mesurés minimum pour conserver une estimation de structure en taille
+seuilsample<-3 # nombre d'échantillons minimum nécessaires pour conserver un estimation de rejet
+seuilsampledis<-3 # nombre d'échantillons minimum nécessaires pour conserver un estimation de rejet
+seuilage<-30   # nombre minimum de poissons âgés nécessaires pour établir les structures aux âges 
+seuilweight<-30    # nombre minimum de poissons pesés pour ne pas utiliser de rtp
+stepIncr<-10   # pas de mesure taille en mm pour les fonctions alkbidule
+typestratif<-"Div" #type de stratification spatiale Div - défaut division ciem ou SubArea pour regroupement par SubArea
+timestratif<-"Quarter"
+#timestratif<-"Year"
+currentyear<-2019
+distotlan<-FALSE # pour lever les rejets aux captures totales
+sex<-F
+nbyear<-currentyear-2009
+param<-data.frame(seuilfish,seuilsample,seuilsampledis,seuilage,seuilweight,
+		  stepIncr,typestratif,timestratif,currentyear,nbyear)
+#data
+load("./data/CSrall.rdata")
+load("./data/CLrall.rdata")
+load("./data/CErall.rdata")
+#subset the data on the time range
+y3<-c(param$currentyear:(param$currentyear-param$nbyear))
+CLr<-subset(CLr,year%in%y3,table="cl")
+CSr<-subset(CSr,year%in%y3,table="hh")
+CEr<-subset(CEr,year%in%y3,table="hh")
+#load("./data/metier.rdata")
+#build metier list
+metier<-data.frame(foCatEu6=sort(unique(c(CLr@cl$foCatEu6,CEr@ce$foCatEu6,CSr@hh$foCatEu6))),
+		ices="",
+		final="")
+
+
+#info table
+wg<-substr(getwd(),
+	1+gregexpr("/",getwd())[[1]][length(gregexpr("/",getwd())[[1]])-1],
+	gregexpr("/",getwd())[[1]][length(gregexpr("/",getwd())[[1]])]-1
+	)
+stock<-gsub("old","",substr(getwd(),1+max(gregexpr("/",getwd())[[1]]),nchar(getwd())))
+info<-defstock(stock,wg,currentyear,CLr,CSr)[[1]]
+
+#test data availability
+tabtest<-teststock(info,CLr,CSr,param)
+#correction stepincr si nephrops
+if(grepl("nep.",info$stock)){param$stepIncr<-1}
+
+
+#test si anf on change esp and co
+if(info$stock=="anf.27.3a46"){
+	info$taxon<-"ANF"
+	info$species<-"Lophius spp"
+	CLr@cl$taxon<-"ANF"
+	CSr<-aggcs(CSr,info$species)
+	tabtest<-teststock(info,CLr,CSr,param)
+}
+#test si anf on change esp and co
+if(info$stock=="alf.27.nea"){
+	info$taxon<-"ALF"
+	info$species<-"Beryx spp"
+	#CLr<-aggcl(CLr,info$taxon)
+	CSr<-aggcs(CSr,info$species)
+	tabtest<-teststock(info,CLr,CSr,param)
+}
+if(info$stock=="rng.27.5b6712b"){
+	info$species<-"Coryphaenoides rupestris"
+	CSr<-aggcs(CSr,info$species)
+	tabtest<-teststock(info,CLr,CSr,param)
+}
+if(info$stock%in%c("lez.27.4a6a","lez.27.6b")){
+	info$taxon<-"LEZ"
+	info$species<-"Lepidorhombus spp"
+	CLr<-aggcl(CLr,info$taxon)
+	CSr<-aggcs(CSr,info$species)
+	tabtest<-teststock(info,CLr,CSr,param)
+}
+if(info$stock%in%c("hom.27.3a4bc7d","hom.27.2a4a5b6a7a-ce-k8")){
+	info$taxon<-"HOM"
+	info$species<-"Trachurus trachurus"
+	CLr<-aggcl(CLr,info$taxon)
+	CSr<-aggcs(CSr,info$species)
+	tabtest<-teststock(info,CLr,CSr,param)
+}
+if(info$stock=="fle.27.3a4"){
+	CEr<-subset(CEr,area%in%unique(CLr@cl$area))
+}
+#info and tabtest again if changes occur
+info<-defstock(stock,wg,currentyear,CLr,CSr)[[1]]
+tabtest<-teststock(info,CLr,CSr,param)
+
+
+```
+
+# Framework
+
+## Generalities
+
+This document report the results of the ICES data compilation
+for the stock `r print(info$stock)`. From the raw data, the data exploration leads to the
+elimination of spurious information inside the sampling data.
+SACROIS, OBSMER and OBSVENTE metier are roughly associated with the ICES authorized metier using using gear, species assemblage and mesh size.
+Then metier for wich landings less than 10% of the total are categorized in MIS,
+and discards and length/age distribution if available are removed from the final
+estimates.
+A stratum is a statistical unit in which estimates are computed. In general terms it is about
+a quarter, an ICES division and a metier.
+By stratum, discards are estimated using ratio estimators on landings for the stock species.
+For the remaining metier, estimates (discards and length/age distribution) are provided by stratum if and only if :
+
+- (1) for the discards: the number of samples is greater than `r param$seuilsample` 
+  (`r param$seuilsampledis` samples for discards) inside the stratum.
+- (2) for the length/age distribution: the number of fish measured is greater than `r param$seuilfish` for
+  length and age distribution inside the stratum and the number of samples is in
+  line with the condition (1).
+- (3) for the length/age distribution: if the sum of product of the fish weight by the number of fish caught
+  divided by the total quantity of the discards or landings is between 0.8 and
+  1.2 inside the stratum.
+
+If one of these condistions is not meet, then the estimates are not provided.
+
+The raw data are located in the `data` directory and the intercatch file in the
+`ices` directory.
+
+## Details
+
+Random notes :
+
+- in 2019 BMS and registered discards are now provided ! Joy !
+  Data were provided by the wonderful SIH, 
+  the international mother of the fishery data in Ifremer. 
+  In the Intercatch file,
+  new SI lines with catch category B for BMS and R for registered discards are
+  added. For these lines, CATON is set to 0 and BMS and registered discards values are
+  reported in the OffLandings column, as recommended by the gentle 2019 ICES data call. 
+- age length key is completed using a black box approach (multinomial modelling
+  without any check regargind the model convergence) for landings,
+  and simulating young fish using a von Bertalanffy growth model for discards. 
+  This step is
+  experimental, probably buggy, unsatisfactory but validated by ICES. For more
+  details look into the code.
+- in the biological parameters files (slot `ca` of the sampling object), 
+  the information on the position of the individuals fish is not very homogeneous. 
+  Consequently some ad-hoc corrections were introduced to attribute an ICES division to a fish. 
+  For positions that are too vague,
+  (aka 8AB for the location of a fish), the individuals were removed
+  from the data (about 13% of the 677381 processed fishes and 10% for the year
+  2019 - estimations done the 06/04/2020). For a data-saving solution, go back
+  to the original biological parameters files.
+- the data are sop correction free.
+
+# Disclaimer 
+
+The estimates computed here are provided to ICES by default.
+These estimates are formatted in Intercatch files (format defintion 
+here^[https://www.ices.dk/marine-data/Documents/Intercatch/IC-ExchangeFormat1-0.pdf]).
+The intercatch files available in the `ices` directory are submitted 
+to Intercatch^[https://intercatch.ices.dk/] more or less the day of the WG deadline (usually...) 
+(see the datacall webpage^[https://www.ices.dk/marine-data/tools/Pages/Data-calls.aspx] 
+for the deadline).
+If the estimates do not suit your needs, please compute your own
+estimates and the related Intercatch files before the deadline. 
+Intercatch files that do not strickly follow the ICES specifications cannot be
+uploaded on the Intercatch upload facility.
+
+The aim of this report is to document the analytical steps 
+used to compute the ICES estimates and to support data related discussion with
+stock assessor. To understand these steps, the code is provided.
+
+\newpage
+
+# Stock identity
+
+```{r printinfo,cache=TRUE}
+pander(t(info))
+```
+
+`r tabcap(name="info",caption="General stock information.")`
+
+```{r printparam,cache=TRUE}
+pander(t(param))
+```
+
+`r tabcap(name="param",caption="Data compilation parameters.")`
+
+```{r printtabtest,cache=TRUE}
+pander(tabtest)
+```
+
+`r tabcap(name="tabtest",caption="Data availability.")`
+
+# ICES historical data
+
+```{r tabtest,cache=TRUE}
+	load("../../sag2016.rdata")
+	id<-wgparam%>%filter(newstock==info$stock)
+	if(info$stock=="pol.27.67"){id$oldstock<-"pol.27.67"}
+	if(info$stock=="whg.27.7a"){id$oldstock<-"whg.27.7a"}
+	if(info$stock=="sol.27.7bc"){id$oldstock<-"sol-iris"}
+	if(info$stock=="whb.27.1-91214"){id$oldstock<-"whb-comb"}
+	key<-sag%>%filter(FishStockName==id$oldstock)
+	lanoffices<-icesSAG:::getLandingsGraph(key$AssessmentKey)
+	plot(lanoffices)
+	taboffices<-data.frame()
+	try(taboffices<-icesSAG:::getSummaryTable(key$AssessmentKey),silent=T)
+```
+
+`r tabcap(name="iceshistplt",caption="Historical catches from ICES")`
+
+```{r taboffices,cache=TRUE}
+	try(pander((taboffices[[1]]%>%filter(Year>=param$currentyear-param$nbyear)%>%select(Year,landings,discards,units))),silent=T)
+```
+
+`r tabcap(name="iceshistitab",caption="Historical catches from ICES")`
+
+\newpage
+
+# Raw landings and effort
+
+```{r,cache=T,eval=T,echo=FALSE,results="asis"}
+cat("Time series and map of raw landings in french database are presented here. 
+    The relative evolution of the pattern from
+one year to another can help to identify data quality problem or some changes in the fishery.")
+```
+```{r,cache=T,eval=!param[1,2],echo=FALSE,results="asis"}
+cat("Empty section with no plot means no data.")
+```
+
+```{r tsplot1,cache=T,eval=tabtest[1,2],echo=FALSE}
+tsplot<-tscatches(CLr@cl,info,param)
+print(tsplot[[2]])
+```
+
+```{r tsplot1caption,cache=T,eval=tabtest[1,2],echo=FALSE,results="asis"}
+cat(figcap(name="tsarea",caption="Landings by ICES divsion."))
+```
+
+```{r tsplot2,cache=T,eval=tabtest[1,2],echo=FALSE}
+print(tsplot[[1]])
+```
+
+```{r tsplot2caption,cache=T,eval=tabtest[1,2],echo=FALSE,results="asis"}
+cat(figcap(name="tsmet1",caption="Landings by métier level 6. Métiers with landings <1% are grouped."))
+```
+
+```{r fdplot1,cache=T,eval=tabtest[1,2],echo=FALSE}
+fdplot<-tseffort(CEr@ce,info,param)
+print(fdplot[[2]])
+```
+
+```{r fdplot1caption,cache=T,eval=tabtest[1,2],echo=FALSE,results="asis"}
+cat(figcap(name="fdarea",caption="Fishing days by ICES divsion."))
+```
+
+```{r fdplot2,cache=T,eval=tabtest[1,2],echo=FALSE}
+print(fdplot[[1]])
+```
+
+```{r fdplot2caption,cache=T,eval=tabtest[1,2],echo=FALSE,results="asis"}
+cat(figcap(name="fdmet1",caption="Fishing days by métier level 6. Métiers with effort <1% are grouped."))
+```
+
+```{r maplando,cache=T,eval=tabtest[1,2],echo=FALSE}
+maprawlan<-maplan2(CLr,CSr,info,tabtest,param,param$nbyear)
+#maprawlan<-maplan2(CLr,CSr,info,tabtest,param,18)
+```
+
+```{r maplanplt,cache=T,eval=tabtest[1,2],echo=FALSE,fig.height=8,fig.width=8,dpi=72}
+print(maprawlan[[1]])
+```
+
+```{r maplancaption,cache=T,eval=tabtest[1,2],echo=FALSE,results="asis"}
+cat(figcap(name="maplan1",caption="Landings by rectangle"))
+```
+
+# Raw catches in samplings
+
+```{r disinsamp1,cache=T,eval=tabtest[3,2],echo=FALSE}
+slhh<-left_join(CSr@sl,CSr@hh)
+slhh$spp<-sapply(slhh$spp,shortspp)
+tmp<-slhh%>%group_by(spp,year,gear=substr(foCatEu6,1,3),catchCat,area)%>%
+	summarise(w=sum(wt,na.rm=T)/1000)%>%ungroup()#%>%
+rawdissamp<-tmp
+p1<-ggplot(tmp,aes(x=year,y=w,fill=catchCat))+geom_bar(stat="identity")+
+	facet_grid(gear~area+spp,scale="free")+
+	ylab("Catches (kg) in samples")
+print(p1)
+```
+
+```{r disinsamp,cache=T,eval=tabtest[3,2],echo=FALSE}
+tmp<-slhh%>%group_by(spp,year,gear=substr(foCatEu6,1,3),catchCat,area)%>%
+	summarise(w=sum(wt,na.rm=T))%>%ungroup()%>%
+	pivot_wider(names_from=catchCat,values_from=w,values_fill=list(w=0))#%>%
+if(!("LAN"%in%names(tmp))){tmp$LAN<-0}
+tmp<-tmp%>%mutate(rates=DIS/(LAN+DIS))
+
+tmpall<-slhh%>%group_by(spp,year,gear="all",catchCat,area)%>%
+	summarise(w=sum(wt,na.rm=T))%>%ungroup()%>%
+	pivot_wider(names_from=catchCat,values_from=w,values_fill=list(w=0))
+if(!("LAN"%in%names(tmpall))){tmpall$LAN<-0}
+
+tmpall<-tmpall%>%mutate(rates=DIS/(LAN+DIS))
+tmp<-rbind(tmp,tmpall)
+
+
+p1<-ggplot(tmp,aes(x=year,y=rates))+geom_point()+geom_smooth(method="loess",se=F)+
+	facet_grid(gear~area+spp,scale="free")+
+	ylab("Discards rates in samples")
+print(p1)
+```
+
+
+\newpage
+
+```{r mapsampplt,cache=T,eval=tabtest[2,2],echo=FALSE,fig.height=8,fig.width=8,dpi=72}
+print(maprawlan[[3]])
+```
+
+```{r mapsampcaption,cache=T,eval=tabtest[2,2],echo=FALSE,results="asis"}
+cat(figcap(name="samplan1",caption="Number of samples by rectangle"))
+```
+
+\newpage
+
+# CE and CL total values evolution
+
+Because life can be full of surprise, CE and CL values are compared with
+the CE and CL files used years ago (from `r param$currentyear+1` to `r param$currentyear-2`).
+
+```{r verifclce,cache=T,eval=tabtest[1,2],echo=FALSE,results="asis"}
+	#verif CL CE with old version
+ 	pipo<-getoldcl(CLr,info,param)
+	#plot the time series
+	pipo<-pipo%>%filter(year>param$currentyear-7)%>%mutate(year=year-2000)
+	 p1<-ggplot(pipo,aes(x=year,y=value,fill=type))+
+		 geom_bar(alpha=0.7,stat="identity",position=position_dodge())+
+		 facet_grid(name~area,scale="free")+
+			theme(legend.position="bottom")
+	 print(p1)
+```
+
+
+# Data quality
+
+Correction and basic checks are applied to the dataset.
+
+## Weight length equation
+
+The equation is extracted from the national database (completed using
+external information if not available).
+
+```{r findrtp,eval=tabtest[1,2],cache=T}
+	rtp<-findrtp(CLr,CSr)
+	#manouaaaaaaaaallllllll
+	if(info$species=="Lepidorhombus spp"){rtp$a<-3.073e-6;rtp$b=3.245}
+	if(info$species=="Lophius spp"){rtp$a<-2.1175e-5;rtp$b=2.891}
+	if(info$species=="Beryx spp"){rtp$a<-0.00770/1000;rtp$b=3.325}
+	if(info$species=="Argentina silus"){rtp$a<-0.00250/1000;rtp$b=3.301}
+	if(info$species=="Coryphaenoides rupestris"){rtp$a=0.000100;rtp$b=3.1128}
+	if(info$species=="Trachyrincus scabrus"){rtp$a=0.00005;rtp$b=3}
+	if(info$species=="Brosme brosme"){rtp$a=0.00360/1000;rtp$b=3.261}
+	if(info$species=="Glyptocephalus cynoglossus"){rtp$a=0.00001;rtp$b=3}
+	if(info$species=="Sebastes norvegicus"){rtp$a=0.00710/1000;rtp$b=3.180}
+	pander(rtp)
+```
+
+## Weight and age correction
+
+If biological data is available, missing weight are added using the length
+weight relationship. Age lenght data are duplicated for all the ICES division :
+the age length key is supposed to be the same for the stock.
+
+```{r datacorrw1,eval=tabtest[1,2]&(tabtest[2,2]|tabtest[3,2]),cache=T,height=8}
+	CSr<-corrbase(CSr)
+```
+```{r datacorrw2,eval=tabtest[1,2]&(tabtest[2,2]&tabtest[4,2])|(tabtest[3,2]&tabtest[5,2]),cache=T,height=8}
+	rez<-corrsampw(CSr,rtp)
+	pltsampw<-rez[[2]]
+	try(plot(pltsampw),silent=T)
+
+	CSr<-rez[[1]]
+```
+
+```{r datacorrwplot,cache=FALSE,eval=tabtest[2,2]|tabtest[3,2],echo=FALSE,results="asis"}
+cat(figcap(name="datacorrwplot2",caption="Samples weight vs theoritical weight."))
+```
+
+```{r datacorrage,eval=(tabtest[2,2]|tabtest[3,2])&tabtest[7,2],cache=T}
+	#adhoc correction for pb in plaice north 7d
+	if(info$stock=="ple.27.7d"){
+		maxageyear<-CSr@ca%>%group_by(year)%>%summarise(maxage=max(age))
+		#13 is the quantile at age for quantile(maxageyear$maxage,.90)
+		CSr@ca<-CSr@ca%>%filter(age<=13)
+	}
+	rez<-corrcaw(CSr,rtp)
+	#CSr@ca<-rez[[1]];
+	CSr<-rez[[1]]
+```
+
+```{r datacorrageplot0,cache=T,eval=tabtest[7,2],echo=FALSE,results="asis"}
+	pltoldvsnew<-rez[[5]]
+	try(plot(pltoldvsnew),silent=T)
+```
+
+```{r datacorrageplot0leg,cache=T,eval=tabtest[7,2],echo=FALSE,results="asis"}
+cat(figcap(name="datacorrageplot0",caption="Length age raw data vs duplicated one"))
+```
+
+```{r datacorrageplot1,cache=T,eval=tabtest[7,2],echo=FALSE,results="asis"}
+	pltlenwe<-rez[[2]]
+	try(plot(pltlenwe),silent=T)
+```
+
+```{r datacorrageplot1leg,cache=T,eval=tabtest[7,2],echo=FALSE,results="asis"}
+cat(figcap(name="datacorrageplot1",caption="Length weight raw data"))
+```
+
+```{r datacorrage2,eval=tabtest[2,2]&tabtest[7,2],cache=T}
+	pltlenage<-rez[[3]]
+	try(plot(pltlenage),silent=T)
+```
+
+```{r datacorrageplot2,cache=T,eval=tabtest[7,2],echo=FALSE,results="asis"}
+cat(figcap(name="datacorrageplot2",caption="Length age raw data"))
+```
+
+```{r datacorrage3,eval=tabtest[2,2]&tabtest[7,2],cache=T}
+	pltwrtpw<-rez[[4]]
+	try(plot(pltwrtpw),silent=T)
+```
+
+```{r datacorrageplot3,cache=T,eval=tabtest[7,2],echo=FALSE,results="asis"}
+cat(figcap(name="datacorrageplot3",caption="Weights vs theoritical weights and correction"))
+```
+
+## Updated test table
+
+According to the quality checks, the parameter table is updated.
+
+```{r updatetabtest,cache=T,eval=tabtest[6,2]|tabtest[2,2],echo=FALSE,results="asis"}
+#test data availability
+tabtest<-teststock(info,CLr,CSr,param)
+pander(tabtest)
+```
+
+`r tabcap(name="tabtest2",caption="Data availability vs data compilation needs updated.")`
+
+\newpage
+
+# Stratification 
+
+## Métier
+
+The métier stratification is built in two steps. Minor métier are first
+identified using landing and sampling tresholds. Then inside the major métier
+(aka métier landings more than 10% of the total), the main métier are identified and
+other métier are labelled MIS_MIS.
+
+### Main gears 
+
+Main gears in landings and samplings are identified.
+
+```{r tabengin,cache=TRUE,eval=tabtest[1,2]|tabtest[2,2]|tabtest[3,2]}
+	areafish<-dorawmapmet(CLr,CSr,CEr)
+	engin<-areafish%>%select(area,time,foCatEu6,lan,engin)%>%distinct()%>%group_by(engin)%>%
+		summarise(lan=sum(lan,na.rm=T))
+	nbsamplan<-areafish%>%filter(catchCat=="LAN")%>%group_by(engin)%>%summarise(nbsamplan=sum(nbsamp,na.rm=T))
+	nbsampdis<-areafish%>%filter(catchCat=="DIS")%>%group_by(engin)%>%summarise(nbsampdis=sum(nbsamp,na.rm=T))
+	engin<-full_join(full_join(engin,nbsamplan),nbsampdis)%>%arrange(desc(lan),desc(nbsamplan))
+	engin[is.na(engin)]<-0
+	pander(engin%>%filter(lan>1|(nbsamplan>0|nbsampdis>2))%>%data.frame(),split.tables=Inf)
+```
+
+`r tabcap(name="tabengin",caption="Engin (Gears), lan (landings in t), nbsamplan (number of samples for landing), nbsampdis (number of samples for discards)")`
+
+### Minor gears
+
+Métier with a total landings less than 1 t over the whole series AND with less than 2 samples
+are coded `MIS_MIS_0_0_0_HC`.
+
+```{r tabenginmis,cache=TRUE, eval=tabtest[1,2]|tabtest[2,2]|tabtest[3,2]}
+idkeep<-engin%>%
+       filter(lan>1|(nbsamplan>0|nbsampdis>2))%>%
+	select(engin)
+idmis<-engin%>%filter(!engin%in%idkeep$engin)%>%select(engin)
+#prepare met0
+met0<-metier%>%select(foCatEu6,ices,final)%>%mutate(engin=substr(foCatEu6,1,3))%>%distinct()
+met0$final[met0$engin%in%idmis$engin]<-"MIS_MIS_0_0_0"
+met0$final[met0$engin%in%idkeep$engin]<-""
+```
+
+```{r tabenginmis0,cache=TRUE, eval=!tabtest[1,2]|!tabtest[2,2]|!tabtest[3,2]}
+if(!tabtest[1,2]|!tabtest[2,2]|!tabtest[3,2]){
+idmis<-data.frame(engin="")
+idkeep<-data.frame(engin="")
+}
+```
+
+Minor gears are :
+`r (paste(gsub("_","",t(idmis$engin)),collapse=","))`.
+
+The `r nrow(idkeep)` remaining gear(s) are : 
+`r (paste(gsub("_","",t(idkeep$engin)),collapse=","))`.
+
+### Exploratory analysis by main métier 
+
+```{r explometmap,cache=TRUE, eval=tabtest[1,2]|tabtest[2,2]|tabtest[3,2]}
+	areafish<-dorawmapmet(CLr,CSr,CEr)
+	#areafish<-areafish%>%filter(engin%in%idkeep$engin)
+	areafish0<-areafish%>%mutate(foCatEu6=gsub("_0","",foCatEu6),tps=as.numeric(substr(time,1,4))+as.numeric(substr(time,6,6))/5)
+	idli<-areafish0%>%select(foCatEu6,engin)%>%distinct()%>%arrange(desc(foCatEu6))%>%group_by(engin)%>%summarise(n=n())
+	idli<-c(cumsum(idli$n)+0.5)
+	if(all(is.na(areafish0$catchCat))){areafish0$catchCat[is.na(areafish0$catchCat)]<-""}
+	pltrawarea<-ggplot(areafish0)+
+		geom_raster(data=areafish0%>%filter(!is.na(lan)),aes(x=tps,y=foCatEu6,fill=lan),stat="identity",alpha=.75)+ 
+		#geom_point(data=areafish0%>%filter(nbsamp>0 & !is.na(nbsamp)),
+			     #aes(x=time,y=foCatEu6),shape=3,alpha=1)+ 
+		geom_point(data=areafish0,aes(x=tps,y=foCatEu6,size=nbsamp,color=catchCat),shape=1,alpha=1)+ 
+		scale_radius(breaks=c(1,3,10,50))+
+		scale_fill_distiller(palette='Spectral',
+			name="Landing (t)",trans="log10")+
+		geom_hline(yintercept=idli,color="dark grey",linetype="dashed")+
+		#geom_vline(xintercept=c(4.5,8.5),color="dark grey",linetype="dotted")+
+		facet_grid(~area)+ylab("")+
+		theme(legend.position="bottom",
+			axis.text.x  = element_text(angle=90, vjust=0.5, size=6),
+			axis.text.y  = element_text(angle=0, vjust=0, size=6),
+		      	strip.text.x = element_text(size=8, angle=0))
+```
+
+\newpage
+
+```{r plotmetmap,cache=T,eval=tabtest[1,2]|tabtest[2,2]|tabtest[3,2],echo=FALSE,fig.height=9,fig.width=9,dpi=72}
+print(pltrawarea)
+```
+
+```{r plotmetmapcaption,cache=T,eval=tabtest[1,2]|tabtest[2,2]|tabtest[3,2],echo=FALSE,results="asis"}
+cat(figcap(name="pltrawarea",caption="Landings by area, time and metier (raster map) with number of fish measured (circle)."))
+```
+
+\newpage
+
+### Exploratory analysis by main métier 
+
+Length distribution raised to the trip are computed, as a test.
+
+```{r explometlen,cache=TRUE,eval=tabtest[4,2]}
+	#size struct
+	sizefish<-dorawlenhist(CSr,info,param)
+	sizefish<-sizefish%>%mutate(technical=gsub(",","\n",technical),
+				    engin=substr(technical,1,3))%>%
+			filter(engin%in%idkeep$engin)
+	pltrawlen<-ggplot(sizefish,aes(x=length,y=value,colour=technical,linetype=space))+
+			ylab("Length proportion")+xlab("length")+
+			facet_grid(engin~year,scales="free_y") +
+			geom_line(alpha=.6)+
+		theme(legend.text=element_text(size=6))#legend.position="bottom",
+```
+
+
+```{r explometlenplot,cache=T,eval=tabtest[4,2],echo=FALSE,fig.height=9,fig.width=8,dpi=72}
+	try(plot(pltrawlen),silent=T)
+```
+
+```{r pltrawlencaption,cache=FALSE,eval=tabtest[4,2],echo=FALSE,results="asis"}
+cat(figcap(name="pltrawlen",caption="Raw samples length structure in proportion by year and metier (raised to the trip)."))
+```
+
+\newpage
+
+### Final metier stratification 
+
+```{r metfinal0,cache=T,eval=tabtest[1,2]|tabtest[2,2]|tabtest[3,2],echo=FALSE,fig.height=10,fig.width=8,dpi=72}
+	rezdiagmet<-diagmet(CLr,CSr,CEr)
+```
+
+```{r metfinalplt1,cache=T,eval=tabtest[1,2]|tabtest[2,2]|tabtest[3,2],echo=FALSE,fig.height=10,fig.width=8,dpi=72}
+	print(rezdiagmet[[2]])
+```
+
+```{r metfinalplt1caption,cache=T,eval=tabtest[1,2]|tabtest[2,2]|tabtest[3,2],echo=FALSE,results="asis"}
+cat(figcap(name="rezdiagmet2",caption="Landings by area, time and raw metier (raster map) with number of samples (circle)."))
+```
+
+\newpage
+
+### Metier stratification
+
+```{r metfinal,cache=TRUE,echo=T,eval=tabtest[1,2]|tabtest[2,2]|tabtest[3,2],results='asis',echo=F}
+	automet<-rezdiagmet$automet
+	areafish<-rezdiagmet$areafish
+	#add selected metier in met0
+	convmet<-areafish%>%select(foCatEu6,autoices)%>%distinct()%>%
+		left_join(automet%>%filter(propwlan>.10)%>%transmute(autoices,main=1)%>%distinct(),by="autoices")
+	#select metier according to ICES 10% rule
+	met0<-left_join(met0,convmet,by="foCatEu6")%>%mutate(final=ifelse(!is.na(main),autoices,"MIS_MIS_0_0_0"))
+	
+	#a table
+	rez1<-met0%>%left_join(areafish%>%transmute(area,time,foCatEu6,wlan,nlan,ndis),by="foCatEu6")%>%
+			filter(grepl(param$currentyear,time))%>%
+			group_by(final)%>%
+			summarise(wlan=sum(wlan,na.rm=T),nlan=sum(nlan,na.rm=T),ndis=sum(ndis,na.rm=T))%>%
+			ungroup()%>%
+			transmute(final,wlannow=wlan,nlannow=nlan,ndisnow=ndis)
+	rez2<-met0%>%left_join(areafish%>%transmute(area,time,foCatEu6,wlan,nlan,ndis),by="foCatEu6")%>%
+			group_by(final)%>%
+			summarise(wlan=sum(wlan,na.rm=T),nlan=sum(nlan,na.rm=T),ndis=sum(ndis,na.rm=T))%>%
+			ungroup()
+	rez3<-met0%>%left_join(areafish%>%transmute(area,time,foCatEu6,wlan,nlan,ndis),by="foCatEu6")%>%
+			group_by(final)%>%
+			summarise(foCatEu6=paste(sort(unique(foCatEu6)),collapse="\n"))%>%
+			ungroup()%>%mutate(foCatEu6=ifelse(grepl("MIS_MIS",final),"other",foCatEu6))
+	rez<-left_join(left_join(rez1,rez3,by="final"),rez2,by="final")
+	rez<-rez%>%mutate_if(is.numeric,round,2)
+
+	pander(data.frame(
+			  rez%>%arrange(desc(wlannow))%>%transmute(final,foCatEu6,
+								   wlan=paste0(wlannow,"\n (",wlan,")"),
+								   nlan=paste0(nlannow,"\n (", nlan,")"),
+								   ndis=paste0(ndisnow,"\n (",ndis,")")
+								   )
+			  ),split.tables=Inf)
+
+
+```
+
+
+`r tabcap(name="metfinal",caption="Final metier stratification.")`
+
+### Special case
+
+Some metier stratification are fixed by the user (sol and bss only).
+
+```{r metfinalman,cache=TRUE,echo=T,eval=T,results='asis'}
+if(info$stock=="sol.27.8ab"){
+	rezmetman<-metsolmuriel(CLr,CEr,CSr)
+	CSr<-rezmetman$CSr
+	CLr<-rezmetman$CLr
+	CEr<-rezmetman$CEr
+	met0<-rezmetman$metier
+}
+if(info$stock=="bss.27.8ab"){
+	rezmetman<-metbssmikael(CLr,CEr,CSr)
+	CSr<-rezmetman$CSr
+	CLr<-rezmetman$CLr
+	CEr<-rezmetman$CEr
+	met0<-rezmetman$metier
+}
+```
+
+
+## Space and time
+
+### Time
+
+Quarter or Year : it refers to the compilation parameter table following the datacall request.
+
+### Space
+
+```{r espace,cache=TRUE,eval=tabtest[1,2]|tabtest[2,2]|tabtest[3,2],echo=tabtest[1,2]|tabtest[2,2]|tabtest[3,2],echo=F}
+#fréquence des zones dans CS sans zone multiple
+areacs<-rev(sort(table(CSr@hh$area[!grepl(",",CSr@hh$area)])))
+nomareacs<-attr(areacs,"dimnames")[[1]]
+if(is.null(nomareacs)){
+	nomareacs<-attr(areacs,"names")[[1]]
+}
+#table de correspondance des zones FAO vs ICES
+listsp<-data.frame(old=unique(c(CSr@hh$area,CLr@cl$area,CEr@ce$area)),new=NA)
+listsp$new<-listsp$old
+#attribution de la zone la plus échantillonnée à un ensemble de zone
+for(i in 2:nrow(listsp)){
+		if(grepl(",",listsp$old[i])){
+				areatmp<-strsplit(listsp$old[i],",")[[1]]
+				listsp$new[i]<-nomareacs[min(which(nomareacs%in%areatmp))]
+			}
+}
+
+#correction Youen stuff
+if(info$wg%in%c("WGNSSK","WKNSEA","WKFLAT")){
+		listsp$new[grepl("27.4",listsp$new)]<-"27.4"
+}
+if(info$stock=="nep.fu.2324"){ listsp$new<-"FU.23-24" }
+if(info$stock=="nep.27.6aoutFU"){ listsp$new<-"27.6.a.outFU"} #SubDiv }
+if(info$stock=="nep.27.7outFU"){ listsp$new<-"27.7.outFU"} 
+if(info$stock=="nep.fu.16"){ listsp$new<-"FU.16"} 
+if(info$stock=="nep.fu.17"){ listsp$new<-"FU.17"} # SubDiv
+if(info$stock=="nep.fu.19"){ listsp$new<-"FU.19"} 
+if(info$stock=="nep.fu.22"){ listsp$new<-"FU.22"} #SubDiv
+if(info$stock=="nep.fu.2021"){ listsp$new<-"FU.20-21"} 
+if(param$typestratif=="SubArea"){
+	listsptmp<-tidyr::separate(listsp,new,into=c("fao","sec","div"))
+	listsptmp<-tidyr::unite(listsptmp,new,fao,sec,sep=".")%>%select(-div)
+	listsp<-listsptmp
+}
+
+if(nrow(listsp)<20){
+	pander(listsp,split.tables=Inf)
+}
+
+
+```
+
+## Final stratification 
+
+```{r mystr,cache=TRUE,eval=tabtest[1,2]|tabtest[2,2]|tabtest[3,2]}
+	myStr<-strIni(timeStrata=tolower(param$timestratif), techStrata='foCatEu6',spaceStrat='area',
+		      	spRec = list(from=listsp$old,to=listsp$new),
+			tcRec = list(from=met0$foCatEu6,to=met0$final))
+	mystrtab<-data.frame("timeStrata"=myStr@timeStrata,
+			     "spaceStrata"=myStr@spaceStrata,
+			     "techStrata"=myStr@techStrata)
+		pander(mystrtab,style="simple")
+```
+
+
+
+\newpage
+
+
+# Validation and consolidation
+
+Using the delta values, samples are valideted inside each stratum.
+
+
+## Sampling checks
+
+```{r delta,cache=TRUE,eval=tabtest[4,2]|tabtest[5,2]}
+	rezdelta<-delta(CSr,myStr,info)
+```
+
+```{r deltaplot,cache=T,eval=tabtest[4,2]|tabtest[5,2],echo=FALSE,fig.height=6,fig.width=6,dpi=72}
+	try(plot(rezdelta[[2]],silent=T))
+```
+
+```{r deltaplotcaption,cache=FALSE,eval=tabtest[4,2]|tabtest[5,2],echo=FALSE,results="asis"}
+cat(figcap(name="deltaplot",caption="Delta plot."))
+```
+
+
+## Validation and consolitation
+
+Data is validated and consolidated (COST terminology). The test table is
+updated.
+
+```{r valcons,cache=TRUE,eval=tabtest[1,2]|tabtest[2,2]|tabtest[3,2]}
+	#use delta checked data
+	if(exists("rezdelta")){ CSr<-rezdelta[[1]]}
+	#test data availability
+	tabtest<-teststock(info,CLr,CSr,param)
+	#Validation/consolidation
+	if(tabtest[2,2]|tabtest[3,2]){
+			CSv <- csDataVal(CSr); CSc <- csDataCons(CSv,myStr)
+			#remove MIS_MIS in CSc
+			CSc<-subset(CSc,!grepl("MIS_MIS",technical),table="hh")
+	}else{
+			CSv <- csDataVal(csData()); CSc <- csDataCons(CSv,myStr)
+	}
+	if(tabtest[1,2]){
+			CLv <- clDataVal(CLr); CLc <- clDataCons(CLv,myStr)
+	}else{
+			CLv <- clDataVal(clData()); CLc <- clDataCons(CLv,myStr)
+	}
+	CEv <- ceDataVal(CEr); CEc <- ceDataCons(CEv,myStr)
+	#on met les longueurs à stepIncr mm d'incrément
+	#if(tabtest[6,2]&tabtest[4,2]){
+	if(nrow(CSc@ca)>1){
+		if(grepl("nep.",info$stock)){CSc@ca<-CSc@ca[1:1,]}
+		CSc<-alkLgthRec(CSc,type='stepIncr',param$stepIncr,preview=FALSE,postview=FALSE,update=TRUE)
+	}
+	#}
+	#update tabtest manually (CSc...)
+	if(nrow(CSc@hl)==0){tabtest[4:5,2]<-FALSE;tabtest[4:5,3]<-0}
+	if(nrow(CSc@hl)==0){tabtest[2:3,2]<-FALSE;tabtest[2:3,3]<-0}
+	#if time stratif is year rtp should be adapted to that so quarter should
+	#agregate rtp in space if myStr agregates space
+	rtp<-rtpagg(rtp,myStr,param)
+
+```
+
+```{r updatetabtestdelta,cache=TRUE,eval=tabtest[1,2]|tabtest[2,2]|tabtest[3,2]}
+pander(tabtest)
+```
+
+`r tabcap(name="tabtestdelta",caption="Data availability vs data compilation needs updated after dela check.")`
+
+## Sampling coverage
+
+### Landing vs sampling numbers
+		
+```{r statech1,cache=TRUE,eval=tabtest[2,2]&tabtest[1,2]}
+  relvalcs<-relativeValue(CSc,field="nbSamp")
+  relvalcl<-relativeValue(CLc,field="landWt")
+  p1<-ggplot(relvalcs@outPut,aes(x=mod,y=100*value))+geom_bar(stat="identity")+
+  		geom_path(data=relvalcl@outPut,aes(x=mod,y=100*value,group=type),col="red")+
+  		geom_point(data=relvalcl@outPut,aes(x=mod,y=100*value),col="red")+
+  		facet_wrap(type~.,scales="free")+
+  		theme(axis.text.x = element_text(angle = 90, hjust = 1,size=6))+
+		ggtitle("Sampling coverage")+
+		xlab("Stratification")+ylab("Percentage")
+    try(print(p1),silent=T)
+```
+
+```{r,cache=TRUE,eval=tabtest[4,2]&tabtest[1,2],echo=F,results="asis"}
+cat(figcap(name="statech1",caption=paste0("Sampling coverage (red: landings, grey bar: number of fish)")))
+```
+
+\newpage
+
+### Number of samples by strata
+
+```{r statech2,cache=TRUE,eval=tabtest[2,2]|tabtest[3,2]}
+statstrat<-CSc@hl%>%mutate_if(is.factor,as.character)
+statstrat<-statstrat%>%group_by(time,space,technical,cat=substr(sort,1,3))%>%#,sex,spp)%>%
+		mutate(opid=paste(trpCode,staNum))%>%
+		summarise(nbmaree=n_distinct(trpCode),
+			  nbop=n_distinct(opid),
+			  nbfish=sum(lenNum,na.rm=T))%>%ungroup()%>%
+			mutate(technical=gsub(",","\n",technical),
+			       space=gsub("27.","",space),
+			       tps=as.numeric(substr(time,1,4))+as.numeric(substr(time,8,8))/5)
+if(param$timestratif=="Year"){
+		   statstrat<-statstrat%>%mutate(tps=as.numeric(substr(time,1,4)))
+}
+
+		p1<-ggplot(statstrat,aes(y=nbop,x=tps,fill=cat))+
+			#geom_point(alpha=.5)+facet_grid(technical~space,scales="free_y")+
+			geom_bar(alpha=.5,stat="identity")+
+			facet_grid(technical~space,scales="free_y")+
+		theme(strip.text.x = element_text(size=8, angle=0),
+		      strip.text.y = element_text(size=6, angle=0),
+  			axis.text.x = element_text(angle = 90, hjust = 1,size=6),
+  			axis.text.y = element_text(angle = 0, hjust = 1,size=6)
+		      )+
+		xlab("Time")+ylab("Number of sampling")+ggtitle("")
+		print(p1)
+
+		#statstrat<-unite(statstrat,"maree/op/fish",nbmaree,nbop,nbfish,sep="/")
+		#pander(data.frame(statstrat%>%filter(grepl(param$currentyear,time))),split.tables=Inf)
+```
+
+```{r,cache=TRUE,eval=tabtest[2,2]&tabtest[3,2],echo=F,results="asis"}
+cat(figcap(name="statech2plt",caption=paste0("Number of sampling by strata")))
+```
+
+\newpage
+
+
+# Discards
+
+## Discards and landings in observation
+
+```{r disvslan,cache=TRUE,eval=tabtest[4,2]&tabtest[5,2],echo=F,cache=T,,fig.height=10,fig.width=8,dpi=72}
+pltdisvslan<-disvslan2(CSc,info)
+plot(pltdisvslan)
+```
+```{r pltdisvslan,cache=TRUE,eval=tabtest[4,2]&tabtest[5,2],echo=F,cache=T,results="asis"}
+cat(figcap(name="pltdisvslan",caption=paste0("Length distribution of the landings (LAN) and discards (DIS) at trip scales by year")))
+
+
+```
+
+## Discards vs landings in the samples
+
+```{r rawdisstat,cache=TRUE,eval=tabtest[3,2],fig.height=7}
+#,fig.keep="none"}
+
+rawdis<-CSc@sl%>%group_by(time,space,technical,type=substr(sort,1,3))%>%summarise(w=sum(wt,na.rm=T))
+rawdis<-tidyr::spread(rawdis,type,w)
+rawef<-CEc@ce%>%group_by(time,space,technical)%>%summarise(nbtrip=sum(trpNum,na.rm=T),daysatsea=sum(daysAtSea))
+rawall<-left_join(rawdis,rawef)
+rawall[is.na(rawall)]<-0
+if(!("LAN"%in%names(rawall))){rawall$LAN<-0}
+rawall<-rawall%>%mutate(taux=round(100*DIS/(DIS+LAN),2))%>%
+	arrange(technical,space,time)%>%
+	mutate(year=as.numeric(substr(time,1,4)))#substr(time,8,8))
+#pander(data.frame(rawall),split.tables=Inf)
+p0<-ggplot(rawall,aes(x=LAN,y=DIS,colour=year,size=taux))+
+	geom_point()+
+	facet_wrap(technical~space,scale="free")+
+	theme_bw()+
+	theme(strip.text.x = element_text(size=8, angle=0),
+	      strip.text.y = element_text(size=6, angle=0),
+		axis.text.x = element_text(angle = 90, hjust = 1,size=6),
+		axis.text.y = element_text(angle = 0, hjust = 1,size=6)
+	      )+
+	xlab("Landings")+ylab("Discards")+ggtitle("Raw catches in sampling")
+#rawall<-rawall%>%mutate(tps=as.numeric(substr(time,1,4))+as.numeric(substr(time,8,8))/4-.125)
+#p1<-ggplot(rawall,aes(x=tps,y=taux))+geom_point()+geom_smooth(method="lm",se="F")+facet_grid(space~technical,scale="free")+ylab("Discards rates in samples")
+#p2<-ggplot(rawall,aes(x=tps,y=daysatsea))+geom_point()+geom_smooth(method="lm",se=F)+facet_grid(space~technical,scale="free")
+
+```
+
+\newpage
+
+```{r rawdisstatplt1,cache=TRUE,eval=tabtest[3,2],fig.height=8}
+print(p0)
+```
+\newpage
+
+
+# Estimation
+
+Estimates of length distribution, discards and age, with biological parameters
+are computed. 
+
+```{r estimation,cache=TRUE,eval=tabtest[1,2],comment=NA,echo=T}
+	#put species in taxon to avoid COST bug in CLc
+	CLctmp<-CLc;CLctmp@cl$taxon<-info$species
+	#define dbe object
+	rez<-createdbe(info,myStr)
+	dbelan<-rez[[1]];wdbelan<-rez[[2]];ldbelan<-rez[[3]]
+	dbedis<-rez[[4]];wdbedis<-rez[[5]];ldbedis<-rez[[6]]
+	#in case of sex create the dbe object
+	sppsex<-paste(info$species,c("F","M"))
+	rez<-createdbe(info%>%mutate(species=sppsex[1]),myStr)
+	dbelan1<-rez[[1]];wdbelan1<-rez[[2]];ldbelan1<-rez[[3]]
+	dbedis1<-rez[[4]];wdbedis1<-rez[[5]];ldbedis1<-rez[[6]]
+	CLctmp1<-CLc;CLctmp1@cl$taxon<-sppsex[1]
+	rez<-createdbe(info%>%mutate(species=sppsex[2]),myStr)
+	dbelan2<-rez[[1]];wdbelan2<-rez[[2]];ldbelan2<-rez[[3]]
+	dbedis2<-rez[[4]];wdbedis2<-rez[[5]];ldbedis2<-rez[[6]]
+	CLctmp2<-CLc;CLctmp2@cl$taxon<-sppsex[2]
+	CScsex<-createCScsex(CSc)
+
+	#length class interval setup
+	if(nrow(CSc@ca)>1&info$taxon!="NEP"){
+		CSc<-alkLgthRec(CSc,type='stepIncr',param$stepIncr,preview=FALSE,postview=FALSE,update=TRUE)
+		CScsex<-alkLgthRec(CScsex,type='stepIncr',param$stepIncr,preview=FALSE,postview=FALSE,update=TRUE)
+	}
+	#raise the length distrib
+	if(tabtest[4,2]){
+		dbelan<-RaiseLgth(dbelan,CSc,CLctmp,spp=info$species,taxon=info$species)
+	}
+	if(tabtest[4,2]&sex){
+		dbelan1<-RaiseLgth(dbelan1,CScsex,CLctmp1,spp=sppsex,taxon=sppsex[1])
+		dbelan2<-RaiseLgth(dbelan2,CScsex,CLctmp2,spp=sppsex,taxon=sppsex[2])
+		#a short verification just in case
+		tot<-dbelan@totalW$estim%>%mutate(tot=value)%>%select(-value)
+		tot1<-dbelan1@totalW$estim%>%mutate(tot1=value)%>%select(-value)
+		tot2<-dbelan2@totalW$estim%>%mutate(tot2=value)%>%select(-value)
+		pipo<-full_join(tot,full_join(tot1,tot2))%>%mutate(check=tot-(tot1+tot2))
+		if(any(abs(pipo$check)>1)){stop("pb in sex in lan")}
+
+	}
+	#raise the discards
+	if(distotlan&tabtest[3,2]){
+		dbedis<-dislantot(dbedis,CSr,info,param,myStr)
+	}
+	if(tabtest[3,2]&tabtest[2,2]&!distotlan){
+		#compute discards
+		dbedis<-totVolume(dbedis,CSc,CEc,CLctmp,type='landings')
+		#compute Rhat by setting landings to 1kg for each stratum
+		CLctmp1<-CLctmp
+		CLctmp1@cl<-CLctmp1@cl%>%group_by_at(vars(1:11))%>%
+			summarise(landWt=1,landMult=1,landValue=0)%>%ungroup()
+		Rhat<-totVolume(dbedis,CSc,CEc,CLctmp1,type='landings')@totalW$estim%>%
+			transmute(time,space,technical,rhat=value)
+		Rhat<-Rhat%>%filter(is.finite(rhat))
+
+		#check outliers with adjoutyaarglob
+		fct1<-function(a){
+			rhat<-a$rhat
+			if(length(rhat)>2){
+				rhat[rhat==0]<-abs(jitter(rhat[rhat==0],factor=1))
+				tmp<-robustbase::adjOutlyingness(rhat,clower=1,cupper=8)$nonOut
+			}else{
+				tmp<-rep(TRUE,length(rhat))
+			}
+			a$ok<-tmp
+			return(a)
+		}
+		Rhat<-Rhat%>%group_by(technical)%>%
+			group_modify(~fct1(.x))
+		pltrhat<-ggplot(data=Rhat%>%ungroup(),aes(x=time,y=rhat,fill=ok,color=ok,group=space))+
+			geom_point()+#geom_smooth(se=F)+
+			#geom_bar(alpha=0.7,stat="identity",position=position_dodge())+
+		facet_grid(technical~space,scale="free")+
+		#scale_y_log10()+
+			theme(legend.position="bottom",
+			axis.text.x  = element_text(angle=90, vjust=0.5, size=6),
+			axis.text.y  = element_text(angle=90, vjust=0, size=6),
+		      	strip.text.x = element_text(size=6, angle=0),
+		      	strip.text.y = element_text(size=6, angle=0),
+			)
+
+		#remove estimation is Rhat is pretty high
+		dbedis@totalW$estim<-semi_join(dbedis@totalW$estim,
+					       Rhat%>%filter(ok),
+					       by=c("time","space","technical"))
+		dbedis@totalWvar<-semi_join(dbedis@totalWvar,
+					       Rhat%>%filter(ok),
+					       by=c("time","space","technical"))
+		dbedis@lenStruc$estim<-semi_join(dbedis@lenStruc$estim,
+						 Rhat%>%filter(ok),
+						 by=c("time","space","technical"))
+		dbedis@lenVar<-semi_join(dbedis@lenVar,
+						 Rhat%>%filter(ok),
+						 by=c("time","space","technical"))
+	}
+	if(tabtest[3,2]&tabtest[2,2]&!distotlan&sex){
+		#a hack to split F/M length in dis
+		CLcdis1<-createCLcdis(CLc,dbedis,sppsex[1])
+		CLcdis2<-createCLcdis(CLc,dbedis,sppsex[2])
+		revCScsex<-CScsex
+		idsl<-as.character(CSc@sl$sort)
+		idsl[grepl("LAN",CSc@sl$sort)]<-sub("LAN","DIS",idsl[grepl("LAN",CSc@sl$sort)])
+		idsl[grepl("DIS",CSc@sl$sort)]<-sub("DIS","LAN",idsl[grepl("DIS",CSc@sl$sort)])
+		revCScsex@sl$sort<-idsl				     
+		idhl<-as.character(CSc@hl$sort)
+		idhl[grepl("LAN",CSc@hl$sort)]<-sub("LAN","DIS",idhl[grepl("LAN",CSc@hl$sort)])
+		idhl[grepl("DIS",CSc@hl$sort)]<-sub("DIS","LAN",idhl[grepl("DIS",CSc@hl$sort)])
+		revCScsex@hl$sort<-idhl				     
+		dbedis1<-RaiseLgth(dbelan1,revCScsex,CLcdis1,spp=sppsex,taxon=sppsex[1])
+		dbedis2<-RaiseLgth(dbelan2,revCScsex,CLcdis2,spp=sppsex,taxon=sppsex[2])
+		dbedis1@catchCat<-dbedis2@catchCat<-"DIS"
+		#a short verification just in case
+		tot<-dbedis@totalW$estim%>%mutate(tot=value)%>%select(-value)
+		tot1<-dbedis1@totalW$estim%>%mutate(tot1=value)%>%select(-value)
+		tot2<-dbedis2@totalW$estim%>%mutate(tot2=value)%>%select(-value)
+		pipo<-full_join(tot,full_join(tot1,tot2))%>%mutate(check=tot-(tot1+tot2))%>%
+			mutate(check=ifelse(is.finite(check),check,0))
+		if(any(abs(pipo$check)>1)){stop("pb in sex for dis")}
+
+	}
+	#compute age if possible
+	if(tabtest[6,2]&sex){stop("WARNING : NO AGE METHODS IMPLEMENTED WITH SEX !")}
+	if(tabtest[6,2]){
+		# fill ALK using multinomial model
+		CSctmp<-CSc
+		#remove -1 age
+		CSctmp@ca<-CSctmp@ca%>%filter(age>-1)
+		#nb line in dbe with finite value diff from zero
+		nblanok<-dbelan@lenStruc$estim%>%
+			filter(is.finite(value))%>%filter(value>0)%>%nrow
+		nbdisok<-dbedis@lenStruc$estim%>%
+			filter(is.finite(value))%>%filter(value>0)%>%nrow
+		#compute age distribution
+		if(tabtest[4,2]&nblanok>0){
+			#multinomial model only for landings
+			CSctmplan<-fillALKmult(CSctmp,info$species,p=10,trace=F)
+			try(dbelan<-RaiseAge(dbelan,CSctmplan),silent=T)
+		}
+		if(tabtest[5,2]&nbdisok>0){
+			#vb for discards and then multinomial for discards
+			rezvbdis<-vb4dis(dbedis,dbelan,CSctmp,param,info)
+			CSctmpdis<-fillALKmult(rezvbdis[[1]],info$species,p=10,trace=F)
+			try(dbedis<-RaiseAge(dbedis,CSctmpdis),silent=T)
+		}
+	}
+	if(tabtest[7,2]){
+		#weight@length and weigth@age
+		#trick to have bpEstim working (rep ca ntimes per technical strata)
+		CSctmp<-CSc
+		listmet1<-unique(as.character(dbelan@lenStruc$estim$technical))
+		listmet2<-unique(as.character(dbedis@lenStruc$estim$technical))
+		listmet<-na.omit(unique(c(listmet1,listmet2)))
+		catmp<-CSctmp@ca
+		techtmp<-rep(listmet,each=nrow(catmp))
+		catmp<-catmp[rep(seq_len(nrow(catmp)),length(listmet)),]
+		catmp$technical<-techtmp
+		CSctmp@ca<-catmp
+		#################
+		wdbelan<-bpEstim(wdbelan,CSctmp,dbelan,adjust=T)
+		wdbedis<-bpEstim(wdbedis,CSctmp,dbedis,adjust=T)
+		ldbelan<-bpEstim(ldbelan,CSctmp,dbelan,adjust=T)
+		ldbedis<-bpEstim(ldbedis,CSctmp,dbedis,adjust=T)
+	}
+```
+
+\newpage
+
+# Intermediate QC on discards
+
+Rhat in sampling are checked by stratum. If the values are identified as
+outliers the estimates are removed both in values and in length distribution.
+The logical behind this QC is to remove Rhat that are not in line with the
+values found in the time series of the observation.
+
+```{r intermediateQCdis,cache=TRUE,eval=T,echo=F,message=F,warning=F,progress=F,verbose=F,comment=NA}
+#put here the results
+print(pltrhat)
+```
+
+## Statistics of the discards rates in sampling
+
+```{r intermediateQCdistab1,cache=TRUE,eval=T,echo=F,message=F,warning=F,progress=F,verbose=F,comment=NA}
+rhatmed<-Rhat%>%filter(rhat>0)%>%
+	group_by(time="all",space="all",technical)%>%
+	summarise(mednozero=median(rhat))
+rhatzero<-Rhat%>%filter(rhat==0)%>%
+	group_by(time="all",space="all",technical)%>%
+	summarise(nbzero=n())
+rhatrez<-full_join(rhatmed,rhatzero,by=c("time","space","technical"))
+pander(rhatrez)
+```
+
+## Removed discards rates
+
+```{r intermediateQCdistab2,cache=TRUE,eval=T,echo=F,message=F,warning=F,progress=F,verbose=F,comment=NA}
+pander(Rhat%>%filter(!ok))
+```
+\newpage
+
+# BMS and registered discards
+
+According to ICES, BMS (and registered discards ?) have to be recorded in the
+OffLandings column of the Intercatch files : in this case CATON is set to 0, and
+these values will probably never be used by the WG.
+
+```{r bmsregdis,cache=TRUE,eval=T,echo=F,message=F,warning=F,progress=F,verbose=F,comment=NA}
+#load bmscl and regdiscl
+bmsCLr<-readRDS("../../01_BMSDISCARDS/bmscl.rds")
+regdisCLr<-readRDS("../../01_BMSDISCARDS/regdiscl.rds")
+#teststing 
+#if(F){
+#bmsCLr@cl$area<-"27.1.b"
+#bmsCLr@cl$taxon<-"COD"
+#	bmsCLr<-aggcl(bmsCLr,info$taxon)
+#regdisCLr@cl$area<-"27.1.b"
+#regdisCLr@cl$taxon<-"COD"
+#	regdisCLr<-aggcl(regdisCLr,info$taxon)
+#}
+#subset on species and spaaace
+bmsCLr<-subset(bmsCLr,taxon==info$taxon)
+regdisCLr<-subset(regdisCLr,taxon==info$taxon)
+spacediv<-areaciem%>%filter(newstock==info$stock&type=="Div")%>%pull(area)
+bmsCLr<-subset(bmsCLr,area%in%spacediv)
+regdisCLr<-subset(regdisCLr,area%in%spacediv)
+yearlist<-param$currentyear:(param$currentyear-param$nbyear)
+bmsCLr<-subset(bmsCLr,year%in%yearlist)
+regdisCLr<-subset(regdisCLr,year%in%yearlist)
+
+#validate and consolidate using the myStr info
+#need to update myStr to include metier not in myStr
+newmet<-data.frame(oldmet=sort(unique(c(bmsCLr@cl$foCatEu6,regdisCLr@cl$foCatEu6))))
+newmet$newmet<-rep("MIS_MIS_0_0_0",nrow(newmet))
+newmet<-newmet%>%filter(!oldmet%in%myStr@tcRec$from)
+myStr2<-myStr
+myStr2@tcRec$from<- c(myStr2@tcRec$from,newmet$oldmet)
+myStr2@tcRec$to<- c(myStr2@tcRec$to,newmet$newmet)
+if(nrow(bmsCLr)>0){ 
+	bmsCLv <- clDataVal(bmsCLr); bmsCLc <- clDataCons(bmsCLv,myStr2)
+}else{
+	bmsCLc<- clDataCons(clDataVal(clData()),myStr2)
+}
+if(nrow(regdisCLr)>0){
+	regdisCLv <- clDataVal(regdisCLr); regdisCLc <- clDataCons(regdisCLv,myStr2)
+}else{
+	regdisCLc<- clDataCons(clDataVal(clData()),myStr2)
+}
+
+#convert output in Intercatch format SI and HI only
+bmsSI<-convCLc2ices(bmsCLc,CEc,myStr2,param,info,catchtype="B")
+regdisSI<-convCLc2ices(regdisCLc,CEc,myStr2,param,info,catchtype="R")
+#a test
+totbms1<-sum(bmsCLr@cl$landWt,na.rm=T)
+totbms2<-sum(bmsSI$SI$OffLandings,na.rm=T)
+print("tot BMS:")
+print(paste(totbms1,totbms2,totbms1-totbms2))
+if(abs(totbms1-totbms2)>1){stop("pb tot bms")}
+totregdis1<-sum(regdisCLr@cl$landWt,na.rm=T)
+totregdis2<-sum(regdisSI$SI$OffLandings,na.rm=T)
+print("tot REGDIS:")
+print(paste(totregdis1,totregdis2,totregdis1-totregdis2))
+if(abs(totregdis1-totregdis2)>1){stop("pb tot regdis")}
+
+#save(regdisCLc,bmsCLc,myStr2,file="test2.rdata")
+
+
+```
+
+# Intercatch output
+
+Intercatch files are generated and saved. From here, figures and tables are
+extracted from the Intercatch files.
+ 
+```{r intercatchempty,cache=TRUE,eval=!tabtest[1,2]&!tabtest[2,2]&!tabtest[3,2],echo=F,message=F,warning=F,progress=F,verbose=F,comment=NA,results='asis'}
+#cas vide
+	cat("\n")
+	cat("No data. Empty export.")
+	cat("\n")
+	testfinal<-exporticesempty(param,info)
+	HIfinal<-testfinal[[1]]
+	SIfinal<-testfinal[[2]]
+	pander(data.frame(testfinal[[3]]))
+```
+
+```{r intercatch,cache=TRUE,eval=tabtest[1,2],message=F,warning=F,progress=F,verbose=F}
+#cas length 
+	#HI SI SD generation
+	#virer les zéros dans les ditributions en taille pour les rejets
+	#check finite value in dbelan and dbedis
+	icesdat<-convert2ices(CLc,CEc,dbelan,dbedis,param,info)
+	#ices with sex info
+	if(sex){
+		icesdat1<-convert2ices(CLctmp1,CEc,dbelan1,dbedis1,param,info)
+		icesdat2<-convert2ices(CLctmp2,CEc,dbelan2,dbedis2,param,info)
+		SDtmp1<-icesdat1$SD%>%mutate(Sex="F")
+		SDtmp2<-icesdat2$SD%>%mutate(Sex="M")
+		icesdat$SD<-rbind(SDtmp1,SDtmp2)
+		#nep corr for intercatch
+		icesdat$SD$NumSamplesLngt<--9
+		icesdat$SD$NumLngtMeas<--9
+		
+	}
+	
+
+	#add weight information
+	#for length first
+	pipo<-addw2len(icesdat,wdbelan,wdbedis,rtp,param)
+	SDtmp<-pipo[[1]]
+	pltwrtplen<-pipo[[2]]
+	if(tabtest[6,2]){
+		pipo<-addwl2age(icesdat,wdbelan,wdbedis,ldbelan,ldbedis,rtp,CSc,param)
+		SDagetmp<-pipo[[1]]
+		pltwrtpage<-pipo[[2]]
+		pltlvbpage<-pipo[[3]]
+		pltagesize<-pipo[[4]]
+	}else{
+		SDagetmp<-icesdat$SDage
+	}
+
+	#add bms and logdis to icesdata$SI ?
+	icesdat$SI<-rbind(icesdat$SI,bmsSI$SI%>%mutate(s=0,n=0),regdisSI$SI%>%mutate(s=0,n=0))
+	bmsregdisHI<-anti_join(rbind(bmsSI$HI,regdisSI$HI)%>%distinct(),icesdat$HI)
+	icesdat$HI<-rbind(icesdat$HI,bmsregdisHI)
+
+	#combine all information
+	allverif<-combineSISDCL(SDtmp,SDagetmp,icesdat$SI,CLc)
+
+	#check results
+	#1. si diff CATON and landWt CLc > 1e-5 -> stop
+	allverif<-allverif%>%
+		mutate(check1=ifelse(diffCATONcl<1e-5,TRUE,FALSE))
+	if(any(!na.omit(allverif$check1))){
+		print(allverif%>%filter(!check1))
+		stop("Difference in landings estimated and registered !")
+	}
+	#2. remove strata with low sampling number for discards
+	allverif<-allverif%>%
+		mutate(check2=ifelse(s>=param$seuilsampledis,TRUE,FALSE))%>%
+		mutate(check2=ifelse(CatchCategory=="D",check2,NA))
+	#3. select strata with s and n ok for discards length distrib
+	allverif<-allverif%>%
+		mutate(check3=ifelse(n>=param$seuilfish & s>=param$seuilsampledis,TRUE,FALSE))%>%
+		mutate(check3=ifelse(CatchCategory=="D",check3,NA))
+	#4. as 3 but for landings
+	allverif<-allverif%>%
+		mutate(check4=ifelse(n>=param$seuilfish & s>=param$seuilsample,TRUE,FALSE))%>%
+		mutate(check4=ifelse(CatchCategory=="L",check4,NA))
+	#5. sop for length distrib
+	allverif<-allverif%>%
+		mutate(check5=ifelse(0.8<=sopl & sopl<=1.2,TRUE,FALSE))%>%
+		mutate(check5=ifelse(is.finite(CATONSD),check5,NA))
+	#6. sop for age distrib
+	allverif<-allverif%>%
+		mutate(check6=ifelse(0.8<=sopa & sopa<=1.2,TRUE,FALSE))%>%
+		mutate(check6=ifelse(is.finite(CATONSDage),check6,NA))
+	#7. harmonize check
+	allverif<-allverif%>%
+		mutate(checkLanDis=ifelse(CatchCategory=="L",check1,check2))%>%
+		mutate(checkLanDis=ifelse(CatchCategory%in%c("B","R"),T,checkLanDis))%>%
+		mutate(checknbsampnbfish=ifelse(CatchCategory=="L",check4,check3))%>%
+		mutate(checksoplen=check5,checksopage=check6)#%>%
+		#select(-check1,-check2,-check3,-check4,-check5,-check6)
+	allverifop<-allverif%>%select(Year,Season,Fleet,FishingArea,CatchCategory,
+				      checkLanDis:checksopage)
+
+	#summarise check
+	fctchecklan<-function(allverif,catchtype="L"){
+		#nb de strate
+		nbtot<-nrow(allverif)
+		#subset by catchcat
+		vtmp<-allverif[allverif$CatchCategory==catchtype,]
+		#nb strata for this catchcat
+		nb<-nrow(vtmp)
+		#nb strata for this catchcat ok
+		nbok<-length(vtmp$check1[vtmp$check1])
+		#nb strata with len distrib
+		nblen<-length(vtmp$check1[is.finite(vtmp$CATONSD)])
+		#nb strata with len distrib with enough samp and fish nb
+		nblenok<-length(vtmp$check1[is.finite(vtmp$CATONSD)&vtmp$check4])
+		#nb strata with len distrib with enough samp and fish nb and sop len ok
+		nblensopok<-length(vtmp$check1[is.finite(vtmp$CATONSD)&vtmp$check4&vtmp$check5])
+		#nb strata with len distrib with enough samp and fish nb and sop age ok
+		nbagesopok<-length(vtmp$check1[is.finite(vtmp$CATONSDage)&vtmp$check4&vtmp$check6])
+		pipo<-data.frame(catchcat=catchtype,nbtot,nb,nbok,nblen,nblenok,nblensopok,nbagesopok)
+		return(pipo)
+	}
+	#summarise check
+	fctcheckdis<-function(allverif){
+		#nb de strate
+		nbtot<-nrow(allverif)
+		#subset by catchcat
+		vtmp<-allverif[allverif$CatchCategory=="D",]
+		#nb strata for this catchcat
+		nb<-nrow(vtmp)
+		#nb strata for this catchcat ok
+		nbok<-length(vtmp$check2[vtmp$check2])
+		#nb strata with len distrib
+		nblen<-length(vtmp$check2[vtmp$check2&is.finite(vtmp$CATONSD)])
+		#nb strata with len distrib with enough samp and fish nb
+		nblenok<-length(vtmp$check2[vtmp$check2&is.finite(vtmp$CATONSD)&vtmp$check3])
+		#nb strata with len distrib with enough samp and fish nb and sop len ok
+		nblensopok<-length(vtmp$check2[vtmp$check2&is.finite(vtmp$CATONSD)&vtmp$check3&vtmp$check5])
+		#nb strata with len distrib with enough samp and fish nb and sop age ok
+		nbagesopok<-length(vtmp$check2[vtmp$check2&is.finite(vtmp$CATONSDage)&vtmp$check3&vtmp$check6])
+		pipo<-data.frame(catchcat="D",nbtot,nb,nbok,nblen,nblenok,nblensopok,nbagesopok)
+		return(pipo)
+	}
+
+		
+
+	#filter data
+	SIfinal<-left_join(icesdat$SI,allverifop)%>%
+		filter(checkLanDis)#%>%
+	SIfinal<-SIfinal[,names(icesdat$SI)]%>%select(-n,-s)
+	HIfinal<-semi_join(icesdat$HI,SIfinal%>%select(-RecordType))
+	SDfinal<-left_join(SDtmp[,names(icesdat$SD)],allverifop)%>%
+		filter(checkLanDis & checknbsampnbfish&checksoplen)%>%
+		select(names(icesdat$SD))
+	SDagefinal<-left_join(SDagetmp[,names(icesdat$SD)],allverifop)%>%
+		filter(checkLanDis & checknbsampnbfish&checksopage)%>%
+		select(names(icesdat$SDage))
+	#summarise ices transmitted info
+	nSDfinal<-SDfinal%>%select(Year,Season,Fleet,FishingArea,CatchCategory)%>%distinct()%>%nrow()
+	nSDagefinal<-SDagefinal%>%select(Year,Season,Fleet,FishingArea,CatchCategory)%>%distinct()%>%nrow()
+	vices<-c(catchCat="ices",nbtot=NA,nb=NA,nbok=nrow(SIfinal),
+			  nblen=NA,nblenok=NA,nblensopok=nSDfinal,
+			  nbagesopok=nSDagefinal)
+	nSDfinalnow<-SDfinal%>%select(Year,Season,Fleet,FishingArea,CatchCategory)%>%
+		filter(Year==param$currentyear)%>%distinct()%>%nrow()
+	nSDagefinalnow<-SDagefinal%>%select(Year,Season,Fleet,FishingArea,CatchCategory)%>%
+		filter(Year==param$currentyear)%>%distinct()%>%nrow()
+	vicesnow<-c(catchCat="ices",nbtot=NA,nb=NA,
+		    nbok=nrow(SIfinal%>%filter(Year==param$currentyear)),
+			  nblen=NA,nblenok=NA,nblensopok=nSDfinalnow,
+			  nbagesopok=nSDagefinalnow)
+
+	#overall table on check
+	v1<-fctchecklan(allverif,"L")
+	v1bms<-fctchecklan(allverif,"B")
+	v1regdis<-fctchecklan(allverif,"R")
+	v2<-fctcheckdis(allverif)
+	v12<-rbind(v1,v2)
+	vtot<-c(catchcat="C",apply(v12[,2:8],2,sum))
+	vtot<-rbind(vtot,v1bms,v1regdis)#%>%tapply(2,sum)
+	v1now<-fctchecklan(allverif%>%filter(Year==param$currentyear))
+	v1nowbms<-fctchecklan(allverif%>%filter(Year==param$currentyear),"B")
+	v1nowregdis<-fctchecklan(allverif%>%filter(Year==param$currentyear),"R")
+	v2now<-fctcheckdis(allverif%>%filter(Year==param$currentyear))
+	v12now<-rbind(v1now,v2now)#%>%tapply(2,sum)
+	vtotnow<-c(catchcat="C",apply(v12now[,2:8],2,sum))
+	vtotnow<-rbind(vtotnow,v1nowbms,v1nowregdis)#%>%tapply(2,sum)
+	tabverif<-rbind(v1now,v2now,vtotnow,vicesnow,v1,v2,vtot,vices)
+	pipo<-data.frame(time=c(rep(param$currentyear,6),rep(paste(param$currentyear,param$currentyear-param$nbyear,sep="-"),6)))
+	tabverif<-cbind(pipo,tabverif)
+	
+
+	#some general graph and table by year and metier year
+	#catches
+	pipo<-yearSI(SIfinal)
+	SIyear<-pipo[[1]]
+	pltSIyear<-pipo[[2]]
+	#effort
+	pipo<-yearHI(HIfinal)
+	HIyear<-pipo[[1]]
+	pltHIyear<-pipo[[2]]
+	#length distrib
+	rezyearSD<-yearSD(SDfinal,param)
+	pltSDyear<-rezyearSD[[1]]
+	pltSDyearbis<-rezyearSD[[5]]
+	pltSDcoh1<-rezyearSD[[2]]
+	pltSDcoh2<-rezyearSD[[3]]
+	pltSDcoh3<-rezyearSD[[4]]
+	rezyearSDage<-yearSD(SDagefinal,param)
+	pltSDageyear<-rezyearSDage[[1]]
+	pltSDagecoh1<-rezyearSDage[[2]]
+	pltSDagecoh2<-rezyearSDage[[3]]
+	pltSDagecoh3<-rezyearSDage[[4]]
+	#bio param
+	pipo<-diagSDwl(SDfinal)
+	pltSDdiaglenw<-pipo[[1]]
+	pipo<-diagSDwl(SDagefinal)
+	pltSDdiagagew<-pipo[[1]]
+	pltSDdiagagel<-pipo[[2]]
+
+
+	#compute rect stat for lan and effort
+	pipo<-cons2rect(CLc,CEc,myStr)
+	lanrect<-pipo[[1]]
+	effrect<-pipo[[2]]
+	rezmapconsrect<-mapconsrect(lanrect,effrect,param,info)
+	pltlanrect<-rezmapconsrect[[1]]
+	plteffrect<-rezmapconsrect[[2]]
+
+	#export file by year
+	writeICyear<-function(HI,SI,SD,SDage,year,info){
+		HI<-HI%>%filter(Year==year)
+		SI<-SI%>%filter(Year==year)
+		if(nrow(SI)==0){
+			emptyHISI<-makeemptyIC(param,info,year)
+			HI<-emptyHISI[[1]]
+			SI<-emptyHISI[[2]]
+		}
+		SD<-SD%>%filter(Year==year)
+		SDage<-SDage%>%filter(Year==year)
+		nomfichage<-paste0("./ices/FRA",year,gsub("-","",info$stock),"_age.csv")
+		nomfichlen<-paste0("./ices/FRA",year,gsub("-","",info$stock),"_length.csv")
+		makeICfile(ICdfs=list(HI=HI,SI=SI,SD=SD),filename=nomfichlen,append=FALSE)
+		makeICfile(ICdfs=list(HI=HI,SI=SI,SD=SDage),filename=nomfichage,append=FALSE)
+	}
+	writeExcel<-function(SI,HI,SD,SDage,lanrect,effrect,year,info){
+		HI<-HI%>%filter(Year==year)
+		SI<-SI%>%filter(Year==year)
+		if(nrow(SI)==0){
+			emptyHISI<-makeemptyIC(param,info,year)
+			HI<-emptyHISI[[1]]
+			SI<-emptyHISI[[2]]
+		}
+		SD<-SD%>%filter(Year==year)
+		SDage<-SDage%>%filter(Year==year)
+		lanrect<-lanrect%>%filter(grepl(year,time))
+		effrect<-effrect%>%filter(grepl(year,time))
+		#create the excel file
+		wb<-createWorkbook()
+		#generate a simple excel file
+		addWorksheet(wb,"SI");writeData(wb,"SI",SI)
+		addWorksheet(wb,"HI");writeData(wb,"HI",HI)
+		addWorksheet(wb,"SD");writeData(wb,"SD",SD)
+		addWorksheet(wb,"SDage");writeData(wb,"SDage",SDage)
+		addWorksheet(wb,"landings by rectangle")
+		addWorksheet(wb,"effort by rectangle")
+		writeData(wb,"landings by rectangle",lanrect)
+		writeData(wb,"effort by rectangle",effrect)
+		accfile<-paste0("./ices/FRA_",param$currentyear,"_",info$wg,"_",info$stock,".xlsx")
+		saveWorkbook(wb,file=accfile,overwrite=T)
+	}
+	#ad hoc correction for some nephrops area
+	nepsubdiv<-c("FU.17","FU.22","27.6.a.outFU")
+	HIfinal<-HIfinal%>%mutate(AreaType=ifelse(FishingArea%in%nepsubdiv,"SubDiv",AreaType))
+	SIfinal<-SIfinal%>%mutate(AreaType=ifelse(FishingArea%in%nepsubdiv,"SubDiv",AreaType))
+	SDfinal<-SDfinal%>%mutate(AreaType=ifelse(FishingArea%in%nepsubdiv,"SubDiv",AreaType))
+	SDagefinal<-SDagefinal%>%mutate(AreaType=ifelse(FishingArea%in%nepsubdiv,"SubDiv",AreaType))
+
+	#save IC by year
+	for(i in param$currentyear:(param$currentyear-param$nbyear)){
+		writeICyear(HIfinal,SIfinal,SDfinal,SDagefinal,year=i,info)
+	}
+	#save excel file
+	writeExcel(SIfinal,HIfinal,SDfinal,SDagefinal,
+		   lanrect,effrect,year=param$currentyear,info)
+
+	
+```
+
+\newpage
+
+# Results
+
+```{r savetruc,cache=TRUE,eval=T,echo=F,cache=T}
+obj<-ls()
+objall<-c("dbelan","dbedis","wdbelan","wdbedis","ldbelan","ldbedis",
+	  "dbelan1","dbedis1","wdbelan1","wdbedis1","ldbelan1","ldbedis1",
+	  "dbelan2","dbedis2","wdbelan2","wdbedis2","ldbelan2","ldbedis2",
+	  "param","info","rtp","icesdat","myStr",
+	  "CSc","CSctmp","CLc","CEc","lanrect","effrect","allverif",
+	  "SIfinal","HIfinal","SDfinal","SDagefinal","bmsSI","regdisSI")
+objok<-obj[obj%in%objall]
+save(list=objok, file="test.rdata")
+```
+
+
+```{r getoldices,cache=TRUE,eval=tabtest[1,2],echo=F,cache=T}
+	oldestim1<-getoldices(param,nbef=0,info,HIfinal,SIfinal,SDfinal,SDagefinal)
+	oldestim2<-getoldices(param,nbef=1,info,HIfinal,SIfinal,SDfinal,SDagefinal)
+	oldestim3<-getoldices(param,nbef=2,info,HIfinal,SIfinal,SDfinal,SDagefinal)
+
+```
+
+\newpage
+
+# Consistency in estimations with time
+
+The `r param$currentyear+1` estimates are compared with the estimations provided in `r param$currentyear`,`r param$currentyear-1` and
+`r param$currentyear-2`, if possible.
+
+## Landings and discards 
+
+```{r totlandis,cache=TRUE,eval=tabtest[1,2],echo=F,cache=T}
+	stock0<-SIfinal%>%
+		group_by(Year=as.numeric(Year),FishingArea,CatchCategory,id=param$currentyear+1)%>%
+		summarise(CATON=sum(CATON,na.rm=T))%>%ungroup()
+	stock1<-oldestim1$SI %>%group_by(Year=as.numeric(Year),FishingArea,CatchCategory,id=param$currentyear)%>%
+		summarise(CATON=sum(CATON,na.rm=T))%>%ungroup()
+	stock2<-oldestim2$SI %>%group_by(Year=as.numeric(Year),FishingArea,CatchCategory,id=param$currentyear-1)%>%
+		summarise(CATON=sum(CATON,na.rm=T))%>%ungroup()
+	stock3<-oldestim3$SI %>%group_by(Year=as.numeric(Year),FishingArea,CatchCategory,id=param$currentyear-2)%>%
+		summarise(CATON=sum(CATON,na.rm=T))%>%ungroup()
+	allversion<-rbind(stock0,stock1,stock2,stock3)%>%
+		mutate(Year=as.numeric(Year),id=paste("estim",as.character(id)))%>%
+		filter(Year>=param$currentyear-3)
+	ggplot(data=allversion,aes(x=Year,y=CATON,fill=id))+
+		geom_bar(alpha=0.7,stat="identity",position=position_dodge())+
+		facet_grid(CatchCategory~FishingArea,scale="free")+
+			theme(legend.position="bottom",
+			axis.text.x  = element_text(angle=90, vjust=0.5, size=6),
+			axis.text.y  = element_text(angle=0, vjust=0, size=6),
+		      	strip.text.x = element_text(size=6, angle=0))
+
+	tab0<-allversion%>%group_by(Year,id,CatchCategory)%>%summarise(w=sum(CATON))%>%ungroup()
+	alltruc<-expand.grid((param$currentyear-3):param$currentyear,
+			     paste("estim",(param$currentyear-2):(param$currentyear+1)),c("D","L"))%>%
+		transmute(Year=Var1,id=Var2,CatchCategory=Var3)
+	tab0<-left_join(alltruc,tab0)
+
+	#landings
+	tab1<-tab0%>%filter(CatchCategory=="L")%>%pivot_wider(values_from=w,names_from=id)
+	#compute diff with last year using diagonal of numerical value of tab1
+	diagL<-tab1[,grepl("estim",names(tab1))]%>%as.matrix()%>%diag()
+	diagL[is.na(diagL)]<-0
+	lastL<-tab1%>%pull(ncol(tab1))
+	lastL[is.na(lastL)]<-0
+	lastL<-lastL+1e-9
+	diffL<-data.frame(V1=round(100*(lastL-diagL)/lastL,2))
+	names(diffL)<-paste0("rounded diff in %\nwith ",param$currentyear+1)
+	tab1<-cbind(tab1,diffL)
+	names(tab1)<-sub("estim ","est",names(tab1))
+	names(tab1)<-sub("CatchCategory","CatchCat",names(tab1))
+	tab1bis<-t(tab1[,-1])
+	colnames(tab1bis)<-tab1[,1]
+
+
+	#discards
+	tab2<-tab0%>%filter(CatchCategory=="D")%>%pivot_wider(values_from=w,names_from=id)
+	#compute diff with last year using diagonal of numerical value of tab1
+	diagD<-tab2[,grepl("estim",names(tab2))]%>%as.matrix()%>%diag()
+	diagD[is.na(diagD)]<-0
+	lastD<-tab2%>%pull(ncol(tab2))
+	lastD[is.na(lastD)]<-0
+	lastD<-lastD+1e-9
+	diffD<-data.frame(V1=round(100*(lastD-diagD)/lastD,2))
+	names(diffD)<-paste0("rounded diff in %\nwith ",param$currentyear+1)
+	tab2<-cbind(tab2,diffD)
+	names(tab2)<-sub("estim ","est",names(tab2))
+	names(tab2)<-sub("CatchCategory","CatchCat",names(tab2))
+	tab2bis<-t(tab2[,-1])
+	colnames(tab2bis)<-tab2[,1]
+
+```
+
+```{r totlandistabL,cache=TRUE,eval=tabtest[1,2],echo=F,cache=T}
+	pander(tab1bis)
+```
+
+```{r totlandistabD,cache=TRUE,eval=tabtest[1,2],echo=F,cache=T}
+
+	pander(tab2bis)
+```
+
+\newpage
+
+## Length distribution
+
+```{r totlenlandis,cache=TRUE,eval=tabtest[1,2],echo=F,cache=T}
+	stock0<-SDfinal%>%
+		group_by(Year=as.numeric(Year),FishingArea,CatchCategory,AgeLength,id=param$currentyear+1)%>%
+		summarise(NumberCaught=sum(NumberCaught,na.rm=T))%>%ungroup()
+	stock1<-oldestim1$SD %>%
+		group_by(Year=as.numeric(Year),FishingArea,CatchCategory,AgeLength,id=param$currentyear)%>%
+		summarise(NumberCaught=sum(NumberCaught,na.rm=T))%>%ungroup()
+	stock2<-oldestim2$SD %>%
+		group_by(Year=as.numeric(Year),FishingArea,CatchCategory,AgeLength,id=param$currentyear-1)%>%
+		summarise(NumberCaught=sum(NumberCaught,na.rm=T))%>%ungroup()
+	stock3<-oldestim3$SD %>%
+		group_by(Year=as.numeric(Year),FishingArea,CatchCategory,AgeLength,id=param$currentyear-2)%>%
+		summarise(NumberCaught=sum(NumberCaught,na.rm=T))%>%ungroup()
+
+	allversion<-rbind(stock0,stock1,stock2,stock3)%>%
+		mutate(id=paste("estim",as.character(id)),Year=as.character(Year),AgeLength=as.numeric(AgeLength))%>%
+		filter(Year>=param$currentyear-3)
+
+	if(nrow(allversion)>0){
+	ggplot(data=allversion,aes(x=AgeLength,y=NumberCaught,group=id,color=id))+
+		geom_line(alpha=0.7)+#,stat="identity",position=position_dodge())+
+		facet_grid(Year+CatchCategory~FishingArea,scale="free")+
+			theme(legend.position="bottom",
+			axis.text.x  = element_text(angle=90, vjust=0.5, size=6),
+			axis.text.y  = element_text(angle=0, vjust=0, size=6),
+		      	strip.text.x = element_text(size=6, angle=0))
+	}
+```
+
+## Age distribution
+
+```{r totagelandis,cache=TRUE,eval=tabtest[1,2],echo=F,cache=T}
+	stock0<-SDagefinal%>%
+		group_by(Year=as.numeric(Year),FishingArea,CatchCategory,AgeLength,id=param$currentyear+1)%>%
+		summarise(NumberCaught=sum(NumberCaught,na.rm=T))%>%ungroup()
+	stock1<-oldestim1$SDage %>%
+		group_by(Year=as.numeric(Year),FishingArea,CatchCategory,AgeLength,id=param$currentyear)%>%
+		summarise(NumberCaught=sum(NumberCaught,na.rm=T))%>%ungroup()
+	stock2<-oldestim2$SDage %>%
+		group_by(Year=as.numeric(Year),FishingArea,CatchCategory,AgeLength,id=param$currentyear-1)%>%
+		summarise(NumberCaught=sum(NumberCaught,na.rm=T))%>%ungroup()
+	stock3<-oldestim3$SDage %>%
+		group_by(Year=as.numeric(Year),FishingArea,CatchCategory,AgeLength,id=param$currentyear-2)%>%
+		summarise(NumberCaught=sum(NumberCaught,na.rm=T))%>%ungroup()
+
+	allversion<-rbind(stock0,stock1,stock2,stock3)%>%
+		mutate(id=paste("estim",as.character(id)),Year=as.character(Year),AgeLength=as.numeric(AgeLength))%>%
+		filter(Year>=param$currentyear-3)
+
+	if(nrow(allversion)>0){
+	ggplot(data=allversion,aes(x=AgeLength,y=NumberCaught,group=id,color=id))+
+		geom_line(alpha=0.7)+#,stat="identity",position=position_dodge())+
+		facet_grid(Year+CatchCategory~FishingArea)+
+			theme(legend.position="bottom",
+			axis.text.x  = element_text(angle=90, vjust=0.5, size=6),
+			axis.text.y  = element_text(angle=0, vjust=0, size=6),
+		      	strip.text.x = element_text(size=6, angle=0))
+	}
+```
+
+\newpage
+
+# Results of the data compilation `r param$currentyear+1` 
+
+## Number of estimated stratum versus delivered one to ICES
+
+```{r check1,cache=TRUE,eval=tabtest[1,2],echo=F,cache=T}
+	pander(tabverif)
+```
+
+## Catches
+
+### Annual total in tons
+
+```{r check2tab,cache=TRUE,eval=tabtest[1,2],echo=F,cache=T}
+	catchtmp<-SIyear%>%group_by(Year)%>%summarise_if(is.numeric,sum,na.rm=T)
+	catchtmp<-catchtmp%>%group_by(Year)%>%summarise_if(is.numeric,round,2)
+	 if(!any(names(catchtmp)%in%c("D"))){catctmp$D<-0}
+	catchtmp<-catchtmp%>%mutate(tx=D/(L+D))
+	pander(catchtmp)
+
+
+```
+
+```{r check2,cache=TRUE,eval=tabtest[1,2],echo=F,cache=T}
+	try(pltSIyear,silent=T)
+```
+
+```{r check2bis,cache=TRUE,eval=tabtest[1,2],echo=F,cache=T,fig.width=12}
+	try(pltlanrect,silent=T)
+```
+
+## Effort 
+
+```{r check3,cache=TRUE,eval=tabtest[1,2],echo=F,cache=T}
+	try(pltHIyear,silent=T)
+```
+
+```{r check3bis,cache=TRUE,eval=tabtest[1,2],echo=F,cache=T,fig.width=12}
+	try(plteffrect,silent=T)
+```
+
+## Length
+
+### Length distribution A
+
+```{r check4,cache=TRUE,eval=tabtest[1,2],echo=F,cache=T}
+	if(tabtest[4,2]){
+	try(print(pltSDyear),silent=T)
+	}
+```
+
+### Length distribution B
+
+```{r check4bisbis,cache=TRUE,eval=tabtest[1,2],echo=F,cache=T}
+	if(tabtest[4,2]){
+	try(print(pltSDyearbis),silent=T)
+	}
+```
+
+### Ridgeline plot of length (total) 
+
+
+```{r check4coh1,cache=TRUE,eval=tabtest[1,2],echo=F,cache=T}
+	if(tabtest[4,2]){
+	try(print(pltSDcoh3),silent=T)
+	}
+```
+
+### Ridgeline plot of length (D and L) 
+
+
+```{r check4coh2,cache=TRUE,eval=tabtest[1,2],echo=F,cache=T}
+	if(tabtest[4,2]){
+	try(print(pltSDcoh2),silent=T)
+	}
+```
+
+### Mean weight at length
+
+```{r check4bis,cache=TRUE,eval=tabtest[1,2],echo=F,cache=T}
+	if(tabtest[4,2]){
+	try(print(pltSDdiaglenw),silent=TRUE)
+	}
+```
+
+## Age
+
+### Age distribution
+
+```{r check5,cache=TRUE,eval=tabtest[1,2],echo=F,cache=T}
+	if(tabtest[6,2]){
+	try(print(pltSDageyear),silent=T)
+	}
+```
+
+### Ridgeline plot of age (total) 
+
+```{r check5coh1,cache=TRUE,eval=tabtest[1,2],echo=F,cache=T}
+	if(tabtest[6,2]){
+	try(print(pltSDagecoh3),silent=T)
+	}
+```
+
+### Ridgeline plot of age (D and L) 
+
+```{r check5coh2,cache=TRUE,eval=tabtest[1,2],echo=F,cache=T}
+	if(tabtest[6,2]){
+	try(print(pltSDagecoh2),silent=T)
+	}
+```
+
+### Mean weight at age
+
+```{r check5bis,cache=TRUE,eval=tabtest[1,2],echo=F,cache=T}
+	if(tabtest[6,2]){
+	try(print(pltSDdiagagew),silent=T)
+	}
+```
+
+### Mean length at age
+
+```{r check5ter,cache=TRUE,eval=tabtest[1,2],echo=F,cache=T}
+	if(tabtest[6,2]){
+	try(print(pltSDdiagagel),silent=T)
+	}
+```
+\newpage
+
+
+# ICES `r param$currentyear+1` estimates with information
+
+
+Legend :
+
+- Time and Fleet are obvious,
+- A is for Area, 
+- C for CatchCategory: L for landings, D for discards, B for BMS, R for
+  registered discards. 
+- w is the weights of the stratum in tons,
+- OffLan is the OfficialLandings values of the stratum in tons (aka logbook
+  based, only for BMS and registered discards),
+- disrate is the discard rate in percentage, 
+- s is the number of samples in the stratum, 
+- sn is the number of samples/the number of measured fish in the stratum,
+- sopl is the sum of product calculated using the weight at length, the
+  estimated number of fish at length caught and the weight of the stratum,
+- sopa is the sum of product calculated using the weight at age, the estimated
+  number of fish caught at age and the weight of the stratum,
+- ices is an indication is the stratum was transmitted to ices (for catch,
+  length -len- and age distribution).
+
+Color code :
+
+- blue: the stratum transmitted to ices (In bold the `r param$currentyear` estimates), 
+- green: value with passed checks :
+  	- w in landings: the value is equal to the landings in the raw data, 
+	- w in discards: s is higher than `r param$seuilsampledis`,
+	- w in BMS and registered discards: w in Offlandings values passed by default,
+	- s in landings: s is higher than `r param$seuilsample`,
+	- s in discards: s is higher than `r param$seuilsampledis`,
+	- sn in landings: s is higher than `r param$seuilsampledis`,
+	- sn in landings: s is higher than `r param$seuilsample` and n is higher than `r param$seuilfish`,
+	- sn in discards: s is higher than `r param$seuilsampledis` and n is higher than `r param$seuilfish`,
+	- sopl: sopl is between 0.8 and 1.2,
+	- sopa: sopa is between 0.8 and 1.2.
+- yellow/blue in ices: in blue transmitted stratum to ICES, in yellow not transmitted.
+- red: for transmitted discards.
+
+\newpage
+
+```{r computeallverif,cache=TRUE,eval=tabtest[1,2],echo=F,cache=T}
+#,results="asis"}
+recheck1<-SIfinal%>%select(Year,Season,FishingArea,Fleet,CatchCategory)%>%
+	distinct()%>%mutate(ices1="catch")
+recheck2<-SDfinal%>%select(Year,Season,FishingArea,Fleet,CatchCategory)%>%
+	distinct()%>%mutate(ices2="len")
+recheck3<-SDagefinal%>%select(Year,Season,FishingArea,Fleet,CatchCategory)%>%
+	distinct()%>%mutate(ices3="age")
+recheck<-recheck1%>%full_join(recheck2)%>%full_join(recheck3)
+recheck[is.na(recheck)]<-"."
+recheck<-recheck%>%unite("ices",ices1,ices2,ices3,sep="/",remove=F)
+disrate<-full_join(
+	allverif%>%filter(CatchCategory=="L")%>%transmute(Year,Season,FishingArea,Fleet,L=CATON),
+	allverif%>%filter(CatchCategory=="D")%>%transmute(Year,Season,FishingArea,Fleet,D=CATON))%>%mutate(disrate=D/(L+D))	
+
+pipo<-allverif%>%
+	left_join(recheck)%>%
+	arrange(desc(Year),Season,desc(Fleet),FishingArea,CatchCategory,ices)%>%
+	left_join(disrate%>%select(-L,-D))%>%
+	mutate(Time=paste(Year,Season),
+	       Time=cell_spec(Time,"latex",
+			      bold=ifelse(Year==param$currentyear,T,F),
+			      color=ifelse(is.na(ices),"black","blue")),
+	       A=gsub("27\\.","",FishingArea),
+	       A=cell_spec(A,"latex",
+			       bold=ifelse(!is.na(ices),T,F),
+			       color=ifelse(is.na(ices),"black","white"),
+			       background=ifelse(is.na(ices),"white","blue")),
+	       Fleet=cell_spec(Fleet,"latex",
+			       bold=ifelse(!is.na(ices),T,F),
+			       color=ifelse(is.na(ices),"black","white"),
+			       background=ifelse(is.na(ices),"white","blue")),
+	       FishingArea=gsub("-","",FishingArea),
+	       C=CatchCategory,
+	       C=cell_spec(C,"latex",
+			       bold=ifelse(!is.na(ices),T,F),
+			       color=ifelse(is.na(ices),"black",ifelse(C=="L","white","red")),
+			       background=ifelse(is.na(ices),"white","blue")),
+	       sn=paste0(s,"/",n),
+	       checknbsamp=ifelse(is.na(check2),F,check2),
+	       checkdist=ifelse(is.na(checknbsampnbfish),F,checknbsampnbfish),
+	       checksoplennona=ifelse(is.na(checksoplen),F,checksoplen),
+	       checksopagenona=ifelse(is.na(checksopage),F,checksopage),
+	       soplshort=ifelse(is.finite(sopl),round(sopl,2),"."),
+	       sopashort=ifelse(is.finite(sopa),round(sopa,2),"."),
+	       sopla=paste0(soplshort,"/",sopashort),
+	       icesnona=ifelse(is.na(ices),".",ices),
+	       w_t=round(CATON/1000,2),
+	       w_t=cell_spec(w_t,"latex",color="black",
+			     background=ifelse(checkLanDis,"green","white")),
+	       OffLan_t=ifelse(OffLandings>=0,round(OffLandings/1000,2),"."),
+	       OffLan_t=cell_spec(OffLan_t,"latex",color="black",
+			     background=ifelse(checkLanDis,"green","white")),
+	       sopl=cell_spec(soplshort,"latex",color="black",
+			     background=ifelse(checksoplennona,"green","white")),
+	       sopa=cell_spec(sopashort,"latex",color="black",
+			     background=ifelse(checksopagenona,"green","white")),
+	       s=cell_spec(s,"latex",color="black",
+			     background=ifelse(checknbsamp,"green","white")),
+	       sn=cell_spec(sn,"latex",color="black",
+			     background=ifelse(checkdist,"green","white")),
+	       ices=cell_spec(icesnona,"latex",bold=T,
+			      color=ifelse(!is.na(ices),"white","black"),
+			     background=ifelse(!is.na(ices),"blue","yellow")),
+	       disrate=round(disrate,2)
+	       ) %>%
+		transmute(Time,Fleet,A,C,w=w_t,OffLan=OffLan_t,disrate,s,sn,sopl,sopa,ices)
+		#transmute(Time,Fleet,A,C,w=w_t,OffLan=OffLan_t,disrate,s,sn,sopl,sopa,ices)
+
+		#w_t=ifelse(checkLanDis,cell_spec(round(CATON/1000,2),"latex",color="green"),".",),
+#		check=paste(checkLanDis,checknbsampnbfish,checksoplen,checksopage))
+
+
+	pipo[is.na(pipo)]<-"."
+	finaltab<-pipo
+
+idok<-which(grepl("catch",finaltab$ices))
+kable(finaltab,format="latex",escape=F,booktabs=T,longtable=T)%>%
+		kable_styling(latex_options=c("hold_position"), font_size=8)#%>%
+#kable(allverif%>%select(-Fleet),format="latex",escape=F,booktabs=T,longtable=T)%>%
+#		kable_styling(latex_options=c("hold_position"), font_size=8)#%>%
+	
+```
+
+```{r intercatchempty1,cache=TRUE,eval=!tabtest[1,2]&!tabtest[2,2]&!tabtest[3,2],echo=F,message=F,warning=F,progress=F,verbose=F,comment=NA,results='asis'}
+#cas vide
+	pander(HIfinal)
+```
+
+```{r intercatchempty2,cache=TRUE,eval=!tabtest[1,2]&!tabtest[2,2]&!tabtest[3,2],echo=F,message=F,warning=F,progress=F,verbose=F,comment=NA,results='asis'}
+#cas vide
+	pander(SIfinal)
+```
+
+\newpage
+
+# R session information
+
+```{r Rsession,cache=TRUE,eval=T,echo=T,cache=T,include=T}
+sessioninfo::session_info()
+```

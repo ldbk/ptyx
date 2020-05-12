@@ -1,2 +1,2 @@
 # ptyx
-COST tools version 2
+Scripts to compute length and age distribution, discards and landings for ICES.
